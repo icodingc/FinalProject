@@ -1,19 +1,3 @@
-# Copyright 2016 Google Inc. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
-"""A library to train Inception using multiple GPU's with synchronous updates.
-"""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -28,8 +12,8 @@ import numpy as np
 import tensorflow as tf
 
 from inception import image_processing
-#from inception import inception_model as inception
-from inception import nin_model as inception
+from inception import inception_model as inception
+#from inception import nin_model as inception
 from inception.slim import slim
 
 FLAGS = tf.app.flags.FLAGS
@@ -80,7 +64,7 @@ RMSPROP_MOMENTUM = 0.9             # Momentum in RMSProp.
 RMSPROP_EPSILON = 1.0              # Epsilon term for RMSProp.
 
 
-def _tower_loss(images, labels, num_classes, scope):
+def _total_loss(images, labels, output_dims, scope):
   """Calculate the total loss on a single tower running the ImageNet model.
 
   We perform 'batch splitting'. This means that we cut up a batch across
@@ -91,12 +75,13 @@ def _tower_loss(images, labels, num_classes, scope):
     images: Images. 4D tensor of size [batch_size, FLAGS.image_size,
                                        FLAGS.image_size, 3].
     labels: 1-D integer Tensor of [batch_size].
-    num_classes: number of classes
+    output_dims. [int,int]
     scope: unique prefix string identifying the ImageNet tower, e.g.
       'tower_0'.
 
   Returns:
-     Tensor of shape [] containing the total loss for a batch of data
+     triplet_loss
+     xent_loss
   """
   # When fine-tuning a model, we do not restore the logits but instead we
   # randomly initialize the logits. The number of classes in the output of the
@@ -104,24 +89,36 @@ def _tower_loss(images, labels, num_classes, scope):
   restore_logits = not FLAGS.fine_tune
 
   # Build inference Graph.
-  logits,endpoints = inception.inference(images, num_classes, for_training=True,
+  logits1,logits2,endpoints = inception.inference(images, output_dims, for_training=True,
                                restore_logits=restore_logits,
                                scope=scope)
 
   # Build the portion of the Graph calculating the losses. Note that we will
   # assemble the total_loss using a custom function below.
   split_batch_size = images.get_shape().as_list()[0]
-  inception.loss(logits, labels, batch_size=split_batch_size)
+  triplet_loss = inception.triplet_loss(logits1,1.0)
+  #TODO add a collection for triplet_loss
+  tf.add_to_collection('triplet_loss',triplet_loss)
+  inception.xent_loss(logits2, labels, batch_size=split_batch_size)
 
   # Assemble all of the losses for the current tower only.
-  losses = tf.get_collection(slim.losses.LOSSES_COLLECTION, scope)
+  xent_losses = tf.get_collection(slim.losses.LOSSES_COLLECTION, scope)
 
   # Calculate the total loss for the current tower.
+  # gather l2_loss from tf.get_variable()
   regularization_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
-  total_loss = tf.add_n(losses + regularization_losses, name='total_loss')
 
+  total_xent_loss = tf.add_n(xent_losses + regularization_losses, name='total_xent_loss')
+  total_triplet_loss = tf.add_n([triplet_loss]+regularization_losses,name='total_triplet_loss')
+
+  return total_xent_loss,total_triplet_loss
+
+def _add_loss_summmaries(prefix,total_loss):
   # Compute the moving average of all individual losses and the total loss.
   loss_averages = tf.train.ExponentialMovingAverage(0.9, name='avg')
+  #TODO what about triplet?
+  if 'triplet' in prefix:losses = tf.get_collection('triplet_loss')
+  else:losses = tf.get_collection(slim.losses.LOSSES_COLLECTION)
   loss_averages_op = loss_averages.apply(losses + [total_loss])
 
   # Attach a scalar summmary to all individual losses and the total loss; do the
@@ -132,137 +129,19 @@ def _tower_loss(images, labels, num_classes, scope):
     loss_name = re.sub('%s_[0-9]*/' % inception.TOWER_NAME, '', l.op.name)
     # Name each loss as '(raw)' and name the moving average version of the loss
     # as the original loss name.
-    tf.scalar_summary(loss_name +' (raw)', l)
-    tf.scalar_summary(loss_name, loss_averages.average(l))
+    tf.scalar_summary(prefix+loss_name +' (raw)', l)
+    tf.scalar_summary(prefix+loss_name, loss_averages.average(l))
+  return loss_averages_op
+#  with tf.control_dependencies([loss_averages_op]):
+#    total_loss = tf.identity(total_loss)
+#  return total_loss
 
-  with tf.control_dependencies([loss_averages_op]):
-    total_loss = tf.identity(total_loss)
-  return total_loss
-
-
-def _average_gradients(tower_grads):
-  """Calculate the average gradient for each shared variable across all towers.
-
-  Note that this function provides a synchronization point across all towers.
-
-  Args:
-    tower_grads: List of lists of (gradient, variable) tuples. The outer list
-      is over individual gradients. The inner list is over the gradient
-      calculation for each tower.
-  Returns:
-     List of pairs of (gradient, variable) where the gradient has been averaged
-     across all towers.
-  """
-  average_grads = []
-  for grad_and_vars in zip(*tower_grads):
-    # Note that each grad_and_vars looks like the following:
-    #   ((grad0_gpu0, var0_gpu0), ... , (grad0_gpuN, var0_gpuN))
-    grads = []
-    for g, _ in grad_and_vars:
-      # Add 0 dimension to the gradients to represent the tower.
-      expanded_g = tf.expand_dims(g, 0)
-
-      # Append on a 'tower' dimension which we will average over below.
-      grads.append(expanded_g)
-
-    # Average over the 'tower' dimension.
-    grad = tf.concat(0, grads)
-    grad = tf.reduce_mean(grad, 0)
-
-    # Keep in mind that the Variables are redundant because they are shared
-    # across towers. So .. we will just return the first tower's pointer to
-    # the Variable.
-    v = grad_and_vars[0][1]
-    grad_and_var = (grad, v)
-    average_grads.append(grad_and_var)
-  return average_grads
-
-
-def train(dataset):
-  """Train on dataset for a number of steps."""
-  with tf.Graph().as_default(), tf.device('/cpu:0'):
-    # Create a variable to count the number of train() calls. This equals the
-    # number of batches processed * FLAGS.num_gpus.
-    global_step = tf.get_variable(
-        'global_step', [],
-        initializer=tf.constant_initializer(0), trainable=False)
-
-    # Calculate the learning rate schedule.
-    num_batches_per_epoch = (dataset.num_examples_per_epoch() /
-                             FLAGS.batch_size)
-    decay_steps = int(num_batches_per_epoch * FLAGS.num_epochs_per_decay)
-
-    # Decay the learning rate exponentially based on the number of steps.
-    lr = tf.train.exponential_decay(FLAGS.initial_learning_rate,
-                                    global_step,
-                                    decay_steps,
-                                    FLAGS.learning_rate_decay_factor,
-                                    staircase=True)
-
-    # Create an optimizer that performs gradient descent.
-    opt = tf.train.RMSPropOptimizer(lr, RMSPROP_DECAY,
-                                    momentum=RMSPROP_MOMENTUM,
-                                    epsilon=RMSPROP_EPSILON)
-
-    # Get images and labels for ImageNet and split the batch across GPUs.
-    assert FLAGS.batch_size % FLAGS.num_gpus == 0, (
-        'Batch size must be divisible by number of GPUs')
-    split_batch_size = int(FLAGS.batch_size / FLAGS.num_gpus)
-
-    # Override the number of preprocessing threads to account for the increased
-    # number of GPU towers.
-    num_preprocess_threads = FLAGS.num_preprocess_threads * FLAGS.num_gpus
-    images, labels = image_processing.distorted_inputs(
-        dataset,
-        num_preprocess_threads=num_preprocess_threads)
-
-    input_summaries = copy.copy(tf.get_collection(tf.GraphKeys.SUMMARIES))
-
-    # Number of classes in the Dataset label set plus 1.
-    # Label 0 is reserved for an (unused) background class.
-    #TODO care about this
-    num_classes = dataset.num_classes() + 1
-    
-     # Split the batch of images and labels for towers.
-    images_splits = tf.split(0, FLAGS.num_gpus, images)
-    labels_splits = tf.split(0, FLAGS.num_gpus, labels)
-
-    # Calculate the gradients for each model tower.
-    tower_grads = []
-    for i in xrange(FLAGS.num_gpus):
-      with tf.device('/gpu:%d' % i):
-        with tf.name_scope('%s_%d' % (inception.TOWER_NAME, i)) as scope:
-          # Force all Variables to reside on the CPU.
-          with slim.arg_scope([slim.variables.variable], device='/cpu:0'):
-            # Calculate the loss for one tower of the ImageNet model. This
-            # function constructs the entire ImageNet model but shares the
-            # variables across all towers.
-            loss = _tower_loss(images_splits[i], labels_splits[i], num_classes,
-                               scope)
-
-          # Reuse variables for the next tower.
-          tf.get_variable_scope().reuse_variables()
-
-          # Retain the summaries from the final tower.
-          summaries = tf.get_collection(tf.GraphKeys.SUMMARIES, scope)
-
-          # Retain the Batch Normalization updates operations only from the
-          # final tower. Ideally, we should grab the updates from all towers
-          # but these stats accumulate extremely fast so we can ignore the
-          # other stats from the other towers without significant detriment.
-          batchnorm_updates = tf.get_collection(slim.ops.UPDATE_OPS_COLLECTION,
-                                                scope)
-
-          # Calculate the gradients for the batch of data on this ImageNet
-          # tower.
-          grads = opt.compute_gradients(loss)
-
-          # Keep track of the gradients across all towers.
-          tower_grads.append(grads)
-
-    # We must calculate the mean of each gradient. Note that this is the
-    # synchronization point across all towers.
-    grads = _average_gradients(tower_grads)
+def train_util(prefix,total_loss,global_step,opt,lr):
+    loss_averages_op = _add_loss_summaries(prefix,total_loss)
+    with tf.control_dependencies([loss_averages_op]):
+        grads = opt.compute_gradients(total_loss)
+    # Apply the gradients to adjust the shared variables.
+    apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
 
     # Add a summaries for the input processing and global_step.
     summaries.extend(input_summaries)
@@ -274,14 +153,10 @@ def train(dataset):
     for grad, var in grads:
       if grad is not None:
         summaries.append(
-            tf.histogram_summary(var.op.name + '/gradients', grad))
-
-    # Apply the gradients to adjust the shared variables.
-    apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
-
+            tf.histogram_summary(prefix+var.op.name + '/gradients', grad))
     # Add histograms for trainable variables.
     for var in tf.trainable_variables():
-      summaries.append(tf.histogram_summary(var.op.name, var))
+      summaries.append(tf.histogram_summary(prefix+var.op.name, var))
 
     # Track the moving averages of all trainable variables.
     # Note that we maintain a "double-average" of the BatchNormalization
@@ -297,8 +172,59 @@ def train(dataset):
 
     # Group all updates to into a single train op.
     batchnorm_updates_op = tf.group(*batchnorm_updates)
+    #https://github.com/tensorflow/tensorflow/blob/master/tensorflow/models/image/cifar10/cifar10.py#L372
+    #differ ?
     train_op = tf.group(apply_gradient_op, variables_averages_op,
                         batchnorm_updates_op)
+    return train_op
+
+def train():
+  """Train on dataset for a number of steps."""
+  with tf.Graph().as_default(), tf.device('/cpu:0'):
+    # Create a variable to count the number of train() calls. This equals the
+    # number of batches processed * FLAGS.num_gpus.
+    global_step = tf.get_variable(
+        'global_step', [],
+        initializer=tf.constant_initializer(0), trainable=False)
+
+    images = tf.placeholder(tf.float32,[None,FLAGS.image_size,FLAGS.image_size,3],name='input')
+    labels = tf.placeholder(tf.int64,[None],name='labels')
+
+    # Calculate the learning rate schedule.
+    #TODO how about deal with num_examples
+    num_examples = 50000
+    num_batches_per_epoch = (num_examples /
+                             FLAGS.batch_size)
+    decay_steps = int(num_batches_per_epoch * FLAGS.num_epochs_per_decay)
+
+    # Decay the learning rate exponentially based on the number of steps.
+    lr = tf.train.exponential_decay(FLAGS.initial_learning_rate,
+                                    global_step,
+                                    decay_steps,
+                                    FLAGS.learning_rate_decay_factor,
+                                    staircase=True)
+
+    # Create an optimizer that performs gradient descent.
+    opt = tf.train.RMSPropOptimizer(lr, RMSPROP_DECAY,
+                                    momentum=RMSPROP_MOMENTUM,
+                                    epsilon=RMSPROP_EPSILON)
+
+    input_summaries = copy.copy(tf.get_collection(tf.GraphKeys.SUMMARIES))
+
+    # Number of classes in the Dataset label set plus 1.
+    # Label 0 is reserved for an (unused) background class.
+    num_classes = dataset.num_classes() + 1
+    
+    # Force all Variables to reside on the CPU.
+    with slim.arg_scope([slim.variables.variable], device='/cpu:0'):
+        total_xent_loss,total_triplet_loss = _total_loss(images_splits[i], labels_splits[i], 
+                [128,num_classes],scope)
+
+    summaries = tf.get_collection(tf.GraphKeys.SUMMARIES, scope)
+    batchnorm_updates = tf.get_collection(slim.ops.UPDATE_OPS_COLLECTION,
+                                                scope)
+    triplet_train_op = train_util('tripletloss_',total_triplet_loss,global_step,opt,lr)
+    xent_train_op = train_util('xentloss_',total_triplet_loss,global_step,opt,lr)
 
     # Create a saver.
     saver = tf.train.Saver(tf.all_variables())
@@ -312,7 +238,6 @@ def train(dataset):
     # Start running operations on the Graph. allow_soft_placement must be set to
     # True to build towers on GPU, as some of the ops do not have GPU
     # implementations.
-    #TODO control gpu
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.6)
     sess = tf.Session(config=tf.ConfigProto(
         gpu_options = gpu_options,
@@ -329,13 +254,11 @@ def train(dataset):
       print('%s: Pre-trained model restored from %s' %
             (datetime.now(), FLAGS.pretrained_model_checkpoint_path))
 
-    # Start the queue runners.
-    tf.train.start_queue_runners(sess=sess)
-
     summary_writer = tf.train.SummaryWriter(
         FLAGS.train_dir,
         graph_def=sess.graph.as_graph_def(add_shapes=True))
 
+    #TODO start train
     for step in xrange(FLAGS.max_steps):
       start_time = time.time()
       _, loss_value = sess.run([train_op, loss])

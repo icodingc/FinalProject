@@ -172,23 +172,33 @@ def cross_entropy_loss(logits, one_hot_labels, label_smoothing=0,
     loss = tf.mul(weight, tf.reduce_mean(cross_entropy), name='value')
     tf.add_to_collection(LOSSES_COLLECTION, loss)
     return loss
-#TODO :) tf.contrib.losses
-def hinge_loss(logits, one_hot_labels, label_smoothing=0,
-                       weight=1.0, scope=None):
-  logits.get_shape().assert_is_compatible_with(one_hot_labels.get_shape())
-  with tf.op_scope([logits, one_hot_labels], scope, 'HingeLoss'):
-    num_classes = one_hot_labels.get_shape()[-1].value
-    one_hot_labels = tf.cast(one_hot_labels, logits.dtype)
-    if label_smoothing > 0:
-      smooth_positives = 1.0 - label_smoothing
-      smooth_negatives = label_smoothing / num_classes
-      one_hot_labels = one_hot_labels * smooth_positives + smooth_negatives
-    cross_entropy = tf.contrib.losses.hinge_loss(logits,
-                                                one_hot_labels,
-                                                scope='xhinge')
-    weight = tf.convert_to_tensor(weight,
-                                  dtype=logits.dtype.base_dtype,
-                                  name='loss_weight')
-    loss = tf.mul(weight, tf.reduce_mean(cross_entropy), name='value')
-    tf.add_to_collection(LOSSES_COLLECTION, loss)
-    return loss
+#TODO add triplet_loss
+# anchor,positive,negative = tf.split(0,3,logits)
+def triplet_loss(anchor,positive,negative,alpha,
+                scope=None):
+  with tf.op_scope([anchor,positive,negative], scope, 'TripletLoss'):
+    alpha = tf.convert_to_tensor(alpha,
+                                  dtype=anchor.dtype.base_dtype,
+                                  name='alpha_margin')
+    pos_dist = tf.reduce_sum(tf.square(tf.sub(anchor,positive)),1)
+    neg_dist = tf.reduce_sum(tf.square(tf.sub(anchor,negative)),1)
+    basic_loss = tf.nn.relu(tf.add(tf.sub(pos_dist,neg_dist),alpha),name='tripletloss')
+    return tf.reduce_mean(basic_loss,0)
+#TODO a trick to expand triplets eg. (pos,anc,neg) also a triplet.
+def triplet_ex_loss(anchor,positive,negative,alpha,
+                scope=None):
+  with tf.op_scope([anchor,positive,negative], scope, 'TripletLoss'):
+    alpha = tf.convert_to_tensor(alpha,
+                                  dtype=anchor.dtype.base_dtype,
+                                  name='alpha_margin')
+    return (triplet_loss(anchor,positive,negative,alpha)+triplet_loss(positive,anchor,negative,alpha))/2.0
+#TODO customized loss [the label always is 0]
+def hinge_loss(logits,alpha,nrof_pairs=3,
+                scope=None):
+  with tf.op_scope([logits], scope, 'HingeLoss'):
+    rst = tf.split(0,nrof_pairs,logits)
+    assert nrof_pairs>=3
+    if nrof_pairs==3:return triplet_loss(rst[0],rst[1],rst[2],alpha,'triplet_loss')
+
+    anchor,positive = rst[0],rst[1]
+    return tf.add_n([triplet_loss(anchor,positive,rst[i]) for i in xrange(2,nrof_pairs)])/tf.cast(nrof_pairs-2,tf.float32)

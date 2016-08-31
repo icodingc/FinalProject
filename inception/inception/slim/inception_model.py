@@ -1,44 +1,3 @@
-# Copyright 2016 Google Inc. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
-"""Inception-v3 expressed in TensorFlow-Slim.
-
-  Usage:
-
-  # Parameters for BatchNorm.
-  batch_norm_params = {
-      # Decay for the batch_norm moving averages.
-      'decay': BATCHNORM_MOVING_AVERAGE_DECAY,
-      # epsilon to prevent 0s in variance.
-      'epsilon': 0.001,
-  }
-  # Set weight_decay for weights in Conv and FC layers.
-  with slim.arg_scope([slim.ops.conv2d, slim.ops.fc], weight_decay=0.00004):
-    with slim.arg_scope([slim.ops.conv2d],
-                        stddev=0.1,
-                        activation=tf.nn.relu,
-                        batch_norm_params=batch_norm_params):
-      # Force all Variables to reside on the CPU.
-      with slim.arg_scope([slim.variables.variable], device='/cpu:0'):
-        logits, endpoints = slim.inception.inception_v3(
-            images,
-            dropout_keep_prob=0.8,
-            num_classes=num_classes,
-            is_training=for_training,
-            restore_logits=restore_logits,
-            scope=scope)
-"""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -48,31 +7,25 @@ import tensorflow as tf
 from inception.slim import ops
 from inception.slim import scopes
 
-
+#TODO expand to DSSM
 def inception_v3(inputs,
+                 output_dims,
                  dropout_keep_prob=0.8,
-                 num_classes=1000,
                  is_training=True,
                  restore_logits=True,
                  scope=''):
-  """Latest Inception from http://arxiv.org/abs/1512.00567.
-
-    "Rethinking the Inception Architecture for Computer Vision"
-
-    Christian Szegedy, Vincent Vanhoucke, Sergey Ioffe, Jonathon Shlens,
-    Zbigniew Wojna
-
+  """
   Args:
     inputs: a tensor of size [batch_size, height, width, channels].
+    output_dims:list of integer. eg.[128,num_classes]
     dropout_keep_prob: dropout keep_prob.
-    num_classes: number of predicted classes.
     is_training: whether is training or not.
     restore_logits: whether or not the logits layers should be restored.
       Useful for fine-tuning a model with different num_classes.
     scope: Optional scope for op_scope.
 
   Returns:
-    a list containing 'logits', 'aux_logits' Tensors.
+    a list containing 'logits' Tensors,which is a list.
   """
   # end_points will collect relevant activations for external use, for example
   # summaries or losses.
@@ -245,20 +198,21 @@ def inception_v3(inputs,
             branch_pool = ops.conv2d(branch_pool, 192, [1, 1])
           net = tf.concat(3, [branch1x1, branch7x7, branch7x7dbl, branch_pool])
           end_points['mixed_17x17x768e'] = net
+        #TODO (remove Auxiliary)
         # Auxiliary Head logits
-        aux_logits = tf.identity(end_points['mixed_17x17x768e'])
-        with tf.variable_scope('aux_logits'):
-          aux_logits = ops.avg_pool(aux_logits, [5, 5], stride=3,
-                                    padding='VALID')
-          aux_logits = ops.conv2d(aux_logits, 128, [1, 1], scope='proj')
-          # Shape of feature map before the final layer.
-          shape = aux_logits.get_shape()
-          aux_logits = ops.conv2d(aux_logits, 768, shape[1:3], stddev=0.01,
-                                  padding='VALID')
-          aux_logits = ops.flatten(aux_logits)
-          aux_logits = ops.fc(aux_logits, num_classes, activation=None,
-                              stddev=0.001, restore=restore_logits)
-          end_points['aux_logits'] = aux_logits
+#        aux_logits = tf.identity(end_points['mixed_17x17x768e'])
+#        with tf.variable_scope('aux_logits'):
+#          aux_logits = ops.avg_pool(aux_logits, [5, 5], stride=3,
+#                                    padding='VALID')
+#          aux_logits = ops.conv2d(aux_logits, 128, [1, 1], scope='proj')
+#          # Shape of feature map before the final layer.
+#          shape = aux_logits.get_shape()
+#          aux_logits = ops.conv2d(aux_logits, 768, shape[1:3], stddev=0.01,
+#                                  padding='VALID')
+#          aux_logits = ops.flatten(aux_logits)
+#          aux_logits = ops.fc(aux_logits, num_classes, activation=None,
+#                              stddev=0.001, restore=restore_logits)
+#          end_points['aux_logits'] = aux_logits
         # mixed_8: 8 x 8 x 1280.
         # Note that the scope below is not changed to not void previous
         # checkpoints.
@@ -314,7 +268,7 @@ def inception_v3(inputs,
             branch_pool = ops.conv2d(branch_pool, 192, [1, 1])
           net = tf.concat(3, [branch1x1, branch3x3, branch3x3dbl, branch_pool])
           end_points['mixed_8x8x2048b'] = net
-          #print(net)
+        #INPUT 8 * 8 * 2048
         # Final pooling and prediction
         with tf.variable_scope('logits'):
           shape = net.get_shape()
@@ -323,35 +277,11 @@ def inception_v3(inputs,
           net = ops.dropout(net, dropout_keep_prob, scope='dropout')
           net = ops.flatten(net, scope='flatten')
           # 2048
-          logits = ops.fc(net, num_classes, activation=None, scope='logits',
+          logits1 = ops.fc(net, output_dims[0], activation=None, scope='logits_cls',
                           restore=restore_logits)
-          # 1000
-          end_points['logits'] = logits
-          end_points['predictions'] = tf.nn.softmax(logits, name='predictions')
-      return logits, end_points
-
-
-def inception_v3_parameters(weight_decay=0.00004, stddev=0.1,
-                            batch_norm_decay=0.9997, batch_norm_epsilon=0.001):
-  """Yields the scope with the default parameters for inception_v3.
-
-  Args:
-    weight_decay: the weight decay for weights variables.
-    stddev: standard deviation of the truncated guassian weight distribution.
-    batch_norm_decay: decay for the moving average of batch_norm momentums.
-    batch_norm_epsilon: small float added to variance to avoid dividing by zero.
-
-  Yields:
-    a arg_scope with the parameters needed for inception_v3.
-  """
-  # Set weight_decay for weights in Conv and FC layers.
-  with scopes.arg_scope([ops.conv2d, ops.fc],
-                        weight_decay=weight_decay):
-    # Set stddev, activation and parameters for batch_norm.
-    with scopes.arg_scope([ops.conv2d],
-                          stddev=stddev,
-                          activation=tf.nn.relu,
-                          batch_norm_params={
-                              'decay': batch_norm_decay,
-                              'epsilon': batch_norm_epsilon}) as arg_scope:
-      yield arg_scope
+          logits2 = ops.fc(net, output_dims[1], activation=None, scope='logits_triplet',
+                          restore=restore_logits)
+          end_points['logits1'] = tf.nn.l2_normalize(logits1,1,1e-9,'embedding')
+          end_points['logits2'] = logits2
+#          end_points['predictions'] = tf.nn.softmax(logits, name='predictions')
+      return logits1, logits2, end_points

@@ -279,9 +279,41 @@ def inception_v3(inputs,
           # 2048
           logits1 = ops.fc(net, output_dims[0], activation=None, scope='logits_cls',
                           restore=restore_logits)
+          #TODO (fulture) add Fusion layer
           logits2 = ops.fc(net, output_dims[1], activation=None, scope='logits_triplet',
                           restore=restore_logits)
-          end_points['logits1'] = tf.nn.l2_normalize(logits1,1,1e-9,'embedding')
-          end_points['logits2'] = logits2
+          end_points['logits2'] = tf.nn.l2_normalize(logits2,1,1e-9,'embedding')
+          end_points['logits1'] = logits1
 #          end_points['predictions'] = tf.nn.softmax(logits, name='predictions')
       return logits1, logits2, end_points
+def nin(inputs,
+        output_dims,
+        is_training=True,
+        restore_logits=True,
+        scope=''):
+  # end_points will collect relevant activations for external use, for example
+  # summaries or losses.
+  end_points = {}
+  with tf.op_scope([inputs], scope, 'nin'):
+    with scopes.arg_scope([ops.conv2d, ops.fc, ops.batch_norm],
+                          is_training=is_training):
+        # conv1
+        end_points['conv1'] = ops.conv2d(inputs,64,[5,5],scope='conv1')
+        end_points['pool1'] = ops.max_pool(end_points['conv1'],[3,3],stride=2,
+                padding='SAME',scope='pool1')
+        # conv2
+        end_points['conv2'] = ops.conv2d(end_points['pool1'],64,[5,5],scope='conv2')
+        end_points['pool2'] = ops.max_pool(end_points['conv2'],[3,3],stride=2,
+                padding='SAME',scope='pool2')
+        # local
+        net = ops.flatten(end_points['pool2'],'flatten')
+        end_points['fc3'] = ops.fc(net,384,scope='fc3')
+        end_points['fc4'] = ops.fc(end_points['fc3'],192,scope='fc4')
+
+        logits1 = ops.fc(end_points['fc4'],output_dims[0],activation=None,scope='logits')
+        logits2 = ops.fc(end_points['fc4'], output_dims[1], activation=None, scope='logits_triplet',
+                          restore=restore_logits)
+        end_points['logits2'] = tf.nn.l2_normalize(logits2,1,1e-9,'embedding')
+        end_points['logits1'] = logits1
+
+    return end_points['logits1'],end_points['logits2'],end_points

@@ -39,10 +39,10 @@ def inference(images, output_dims, for_training=False, restore_logits=True,
     with slim.arg_scope([slim.ops.conv2d],
                         activation=tf.nn.relu,
                         batch_norm_params=batch_norm_params):
-      logits1,logits2,endpoints = slim.inception.inception_v3(
+      logits1,logits2,endpoints = slim.inception.nin(
           images,
           output_dims=output_dims,
-          dropout_keep_prob=0.8,
+#          dropout_keep_prob=0.8,
           is_training=for_training,
           restore_logits=restore_logits,
           scope=scope)
@@ -52,7 +52,7 @@ def inference(images, output_dims, for_training=False, restore_logits=True,
 
   return logits1, logits2, endpoints
 
-def triplet_loss(logits,alpha):
+def triplet_loss(logits,alpha=1.0):
     a,p,n = tf.split(0,3,logits)
     return slim.losses.triplet_loss(a,p,n,alpha)
 

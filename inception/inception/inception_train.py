@@ -130,7 +130,7 @@ def _total_loss(prefix, images, labels, output_dims, scope):
     tf.scalar_summary(prefix+loss_name, loss_averages.average(l))
   with tf.control_dependencies([loss_averages_op]):
     total_loss = tf.identity(total_loss)
-  return total_loss
+  return total_loss , endpoints['logits2']
 def _average_gradients(tower_grads):
   """Calculate the average gradient for each shared variable across all towers.
 
@@ -228,7 +228,7 @@ def xent_train(dataset):
             # Calculate the loss for one tower of the ImageNet model. This
             # function constructs the entire ImageNet model but shares the
             # variables across all towers.
-            loss = _total_loss('xentloss',images_splits[i], labels_splits[i], [num_classes,128],
+            loss,_ = _total_loss('xentloss',images_splits[i], labels_splits[i], [num_classes,128],
                                scope)
 
           # Reuse variables for the next tower.
@@ -385,10 +385,8 @@ def triplet_train(dataset):
     # number of GPU towers.
     num_preprocess_threads = FLAGS.num_preprocess_threads * FLAGS.num_gpus
     #TODO get images,positive,negatives
-    images = tf.placeholder(tf.float32,[30,32,32,3])
-    labels = tf.placeholder(tf.int32,[30])
-
-    input_summaries = copy.copy(tf.get_collection(tf.GraphKeys.SUMMARIES))
+    images = tf.placeholder(tf.float32,[None,32,32,3])
+    labels = tf.placeholder(tf.int32,[None])
 
     # Number of classes in the Dataset label set plus 1.
     # Label 0 is reserved for an (unused) background class.
@@ -409,7 +407,7 @@ def triplet_train(dataset):
             # Calculate the loss for one tower of the ImageNet model. This
             # function constructs the entire ImageNet model but shares the
             # variables across all towers.
-            loss = _total_loss('tripletloss',images_splits[i], labels_splits[i], [num_classes,128],
+            loss,embedding = _total_loss('tripletloss',images_splits[i], labels_splits[i], [num_classes,128],
                                scope)
 
           # Reuse variables for the next tower.
@@ -437,8 +435,6 @@ def triplet_train(dataset):
 #    grads = _average_gradients(tower_grads)
     grads = tower_grads[0]
 
-    # Add a summaries for the input processing and global_step.
-    summaries.extend(input_summaries)
 
     # Add a summary to track the learning rate.
     summaries.append(tf.scalar_summary('learning_rate', lr))
@@ -511,7 +507,7 @@ def triplet_train(dataset):
       print('Loading traing data')
       start = time.time()
       class_per_batch = 10
-      images_per_class = 2000
+      images_per_class = 50
       random_flip = False
       image_paths,num_per_class = util.sample_class(dataset,class_per_batch,images_per_class)
       image_data = util.load_data(image_paths,random_flip,)
@@ -527,11 +523,13 @@ def triplet_train(dataset):
       for i in xrange(nrof_batches_per_epoch):
         batch_ = util.get_batch(image_data, FLAGS.batch_size, i)
         feed_dict = {images: batch_, labels: np.zeros(batch_.shape[0])}
-        emb_list += sess.run([embeddings], feed_dict=feed_dict)
+        emb_list += sess.run([embedding], feed_dict=feed_dict)
       # Stack the embeddings to a nrof_examples_per_epoch x 128 matrix
       emb_array = np.vstack(emb_list)  
+      print('Forward %d images in %.2f seconds' % (emb_array.shape[0], time.time()-start_time))
 
       # Select triplets based on the embeddings
+      start_time = time.time()
       triplets, nrof_random_negs, nrof_triplets = util.select_triplets(
             emb_array, num_per_class, image_data, class_per_batch, FLAGS.alpha)
       selection_time = time.time() - start_time
@@ -556,9 +554,11 @@ def triplet_train(dataset):
           print(format_str % (datetime.now(), step, loss_value,
                             examples_per_sec, duration))
 
+        print('--------------------------------------1')
         if step % 100 == 0:
           summary_str = sess.run(summary_op)
           summary_writer.add_summary(summary_str, step)
+        print('--------------------------------------2')
 
         # Save the model checkpoint periodically.
         if step % 5000 == 0 or (step + 1) == FLAGS.max_steps:

@@ -7,6 +7,8 @@ from __future__ import print_function
 
 import os,sys
 import numpy as np
+from scipy import misc
+from tqdm import tqdm
 
 class ImageClass():
     "Stores the paths to images for a given class"
@@ -74,13 +76,12 @@ def prewhiten(x):
     mean = np.mean(x)
     std = np.std(x)
     std_adj = np.max(std, 1.0/np.sqrt(x.size))
-    y = np.multiply(np.subtract(x, mean), 1/std_adj)
+    y = np.multiply(np.subtract(x, mean), 1.0/std_adj)
     return y  
-
 def load_data(image_paths, do_random_flip, do_prewhiten=True):
     nrof_samples = len(image_paths)
     img_list = [None] * nrof_samples
-    for i in range(nrof_samples):
+    for i in xrange(nrof_samples):
         img = misc.imread(image_paths[i])
         if do_prewhiten:
             img = prewhiten(img)
@@ -125,8 +126,9 @@ def select_triplets(embeddings, num_per_class, image_data, people_per_batch, alp
     emb_start_idx = 0
     nrof_random_negs = 0
     for i in xrange(people_per_batch):
+        print('class %d \n' % (i))
         n = num_per_class[i]
-        for j in range(1,n):
+        for j in tqdm(xrange(1,n)):
             a_idx = emb_start_idx
             p_idx = emb_start_idx + j
             as_arr[shuffle[trip_idx]] = image_data[a_idx]

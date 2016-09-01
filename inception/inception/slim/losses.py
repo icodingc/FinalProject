@@ -173,6 +173,8 @@ def cross_entropy_loss(logits, one_hot_labels, label_smoothing=0,
     tf.add_to_collection(LOSSES_COLLECTION, loss)
     return loss
 #TODO :) tf.contrib.losses
+#alpha ?
+#TODO hinge_loss is different from triplet_loss ??? :(
 def hinge_loss(logits, one_hot_labels, label_smoothing=0,
                        weight=1.0, scope=None):
   logits.get_shape().assert_is_compatible_with(one_hot_labels.get_shape())

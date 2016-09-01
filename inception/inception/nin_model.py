@@ -52,7 +52,7 @@ def inference(images, num_classes, for_training=False, restore_logits=True,
       'epsilon': 0.001,
   }
   # Set weight_decay for weights in Conv and FC layers.
-  with slim.arg_scope([slim.ops.conv2d, slim.ops.fc], weight_decay=0.00004):
+  with slim.arg_scope([slim.ops.conv2d, slim.ops.fc], weight_decay=0.0001):
     with slim.arg_scope([slim.ops.conv2d],
                         activation=tf.nn.relu,
                         batch_norm_params=batch_norm_params):

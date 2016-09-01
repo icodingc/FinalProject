@@ -76,6 +76,8 @@ def loss(logits, labels, batch_size=None):
                                     1.0, 0.0)
 
   # Cross entropy loss for the main softmax prediction.
+  #[sim+,sim-,sim-,...]==>[1,0,0,...]
+  #TODO using similarity but not distance
   slim.losses.cross_entropy_loss(logits[0],
                                  dense_labels,
                                  label_smoothing=0.1,
@@ -83,6 +85,7 @@ def loss(logits, labels, batch_size=None):
   # define constant_labels [1,0,0,0,0...]
   labels_ = tf.zeros(FLAGS.batch_size)
   constant_labels = tf.one_hot(labels_,num_exs)
+  #TODO should rewrite triplet_loss....(which differ from hinge_loss)
   #TODO there add DSSM loss
   slim.losses.hinge_loss(logits[1],
                         constant_labels,

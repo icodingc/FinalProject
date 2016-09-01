@@ -14,6 +14,7 @@ import tensorflow as tf
 from inception import image_processing
 from inception import inception_model as inception
 from inception.slim import slim
+from inception.util import tripletnet as util
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -348,7 +349,7 @@ def xent_train(dataset):
         checkpoint_path = os.path.join(FLAGS.train_dir, 'model.ckpt')
         saver.save(sess, checkpoint_path, global_step=step)
 #TODO queue batch_loader (blog)
-def triplet_train():
+def triplet_train(dataset):
   """Train on dataset for a number of steps."""
   with tf.Graph().as_default(), tf.device('/cpu:0'):
     # Create a variable to count the number of train() calls. This equals the
@@ -503,31 +504,67 @@ def triplet_train():
     summary_writer = tf.train.SummaryWriter(
         FLAGS.train_dir,
         graph_def=sess.graph.as_graph_def(add_shapes=True))
-
-    for step in xrange(FLAGS.max_steps):
+    step = 0
+    while step < FLAGS.max_steps:
       start_time = time.time()
       #TODO get triplets and train
-      #TODO
-      feed_dict = {images:np.random.rand(30,32,32,3).astype(np.float32),labels:np.zeros(30)}
-      _, loss_value = sess.run([train_op, loss],feed_dict)
-      duration = time.time() - start_time
+      print('Loading traing data')
+      start = time.time()
+      class_per_batch = 10
+      images_per_class = 2000
+      random_flip = False
+      image_paths,num_per_class = util.sample_class(dataset,class_per_batch,images_per_class)
+      image_data = util.load_data(image_paths,random_flip,)
+      load_time = time.time() -start
+      print('Loaded %d images in %.2f seconds' % (image_data.shape[0], load_time))
 
-      assert not np.isnan(loss_value), 'Model diverged with loss = NaN'
+      print('Selecting suitable triplets for training')
+      start_time = time.time()
+      emb_list = []
+      #Run a forward pass for the sampled images
+      nrof_examples_per_epoch = class_per_batch * images_per_class
+      nrof_batches_per_epoch = int(np.floor(nrof_examples_per_epoch / FLAGS.batch_size))
+      for i in xrange(nrof_batches_per_epoch):
+        batch_ = util.get_batch(image_data, FLAGS.batch_size, i)
+        feed_dict = {images: batch_, labels: np.zeros(batch_.shape[0])}
+        emb_list += sess.run([embeddings], feed_dict=feed_dict)
+      # Stack the embeddings to a nrof_examples_per_epoch x 128 matrix
+      emb_array = np.vstack(emb_list)  
 
-      if step % 10 == 0:
-        examples_per_sec = FLAGS.batch_size / float(duration)
-        format_str = ('%s: step %d, loss = %.2f (%.1f examples/sec; %.3f '
+      # Select triplets based on the embeddings
+      triplets, nrof_random_negs, nrof_triplets = util.select_triplets(
+            emb_array, num_per_class, image_data, class_per_batch, FLAGS.alpha)
+      selection_time = time.time() - start_time
+      print('(nrof_random_negs, nrof_triplets) = (%d, %d): time=%.3f seconds' % (
+      nrof_random_negs, nrof_triplets, selection_time))
+      
+      # Perform training on the selected triplets   
+      i = 0
+      while i*FLAGS.batch_size < nrof_triplets*3 and step < FLAGS.max_steps:
+        start = time.time()
+        batch_  = util.get_triplet_batch(triplets,FLAGS.batch_size,i)
+        feed_dict={images:batch_,labels:np.zeros(batch_.shape[0])}
+        _, loss_value = sess.run([train_op, loss],feed_dict)
+        duration = time.time() - start_time
+
+        assert not np.isnan(loss_value), 'Model diverged with loss = NaN'
+
+        if step % 10 == 0:
+          examples_per_sec = FLAGS.batch_size / float(duration)
+          format_str = ('%s: step %d, loss = %.2f (%.1f examples/sec; %.3f '
                       'sec/batch)')
-        print(format_str % (datetime.now(), step, loss_value,
+          print(format_str % (datetime.now(), step, loss_value,
                             examples_per_sec, duration))
 
-#      if step % 100 == 0:
-#        summary_str = sess.run(summary_op)
-#        summary_writer.add_summary(summary_str, step)
-#
-#      # Save the model checkpoint periodically.
-#      if step % 5000 == 0 or (step + 1) == FLAGS.max_steps:
-#        checkpoint_path = os.path.join(FLAGS.train_dir, 'model.ckpt')
-#        saver.save(sess, checkpoint_path, global_step=step)
+        if step % 100 == 0:
+          summary_str = sess.run(summary_op)
+          summary_writer.add_summary(summary_str, step)
+
+        # Save the model checkpoint periodically.
+        if step % 5000 == 0 or (step + 1) == FLAGS.max_steps:
+          checkpoint_path = os.path.join(FLAGS.train_dir, 'model.ckpt')
+          saver.save(sess, checkpoint_path, global_step=step)
+        step += 1
+        i += 1
 
 

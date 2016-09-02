@@ -125,10 +125,10 @@ def select_triplets(embeddings, num_per_class, image_data, people_per_batch, alp
     np.random.shuffle(shuffle)
     emb_start_idx = 0
     nrof_random_negs = 0
-    for i in xrange(people_per_batch):
-        print('class %d \n' % (i))
+    for i in tqdm(xrange(people_per_batch)):
+        #print('class %d' % (i))
         n = num_per_class[i]
-        for j in tqdm(xrange(1,n)):
+        for j in xrange(1,n):
             a_idx = emb_start_idx
             p_idx = emb_start_idx + j
             as_arr[shuffle[trip_idx]] = image_data[a_idx]

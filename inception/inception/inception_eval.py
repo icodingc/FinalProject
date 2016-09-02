@@ -28,7 +28,7 @@ import numpy as np
 import tensorflow as tf
 
 from inception import image_processing
-from inception import nin_model as inception
+from inception import inception_model as inception
 
 
 FLAGS = tf.app.flags.FLAGS
@@ -138,11 +138,11 @@ def evaluate(dataset):
 
     # Build a Graph that computes the logits predictions from the
     # inference model.
-    logits, _= inception.inference(images, num_classes)
+    logits,_, _= inception.inference(images, [num_classes,128])
 
     # Calculate predictions.
-    top_1_op = tf.nn.in_top_k(logits[0], labels, 1)
-    top_5_op = tf.nn.in_top_k(logits[0], labels, 5)
+    top_1_op = tf.nn.in_top_k(logits, labels, 1)
+    top_5_op = tf.nn.in_top_k(logits, labels, 5)
 
     # Restore the moving average version of the learned variables for eval.
     variable_averages = tf.train.ExponentialMovingAverage(

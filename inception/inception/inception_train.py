@@ -65,7 +65,6 @@ RMSPROP_DECAY = 0.9                # Decay term for RMSProp.
 RMSPROP_MOMENTUM = 0.9             # Momentum in RMSProp.
 RMSPROP_EPSILON = 1.0              # Epsilon term for RMSProp.
 
-
 def _total_loss(prefix, images, labels, output_dims, scope):
   """Calculate the total loss on a single tower running the ImageNet model.
 
@@ -98,20 +97,18 @@ def _total_loss(prefix, images, labels, output_dims, scope):
   # Build the portion of the Graph calculating the losses. Note that we will
   # assemble the total_loss using a custom function below.
   split_batch_size = images.get_shape().as_list()[0]
-  inception.xent_loss(logits1, labels, batch_size=split_batch_size)
-
-  triplet_loss = inception.triplet_loss(logits2,FLAGS.alpha)
-  tf.add_to_collection('triplet_loss',triplet_loss)
-
 
   # Calculate the total loss for the current tower.
   # gather l2_loss from tf.get_variable()
   regularization_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
 
   if 'triplet' in prefix:
+    triplet_loss = inception.triplet_loss(logits2,FLAGS.alpha)
+    tf.add_to_collection('triplet_loss',triplet_loss)
     losses = tf.get_collection('triplet_loss',scope)
     total_loss = tf.add_n(losses + regularization_losses, name='total_triplet_loss')
   else:
+    inception.xent_loss(logits1, labels, batch_size=split_batch_size)
     losses = tf.get_collection(slim.losses.LOSSES_COLLECTION,scope)
     total_loss = tf.add_n(losses+regularization_losses,name='total_xent_loss')
   # Compute the moving average of all individual losses and the total loss.
@@ -253,7 +250,8 @@ def xent_train(dataset):
 
     # We must calculate the mean of each gradient. Note that this is the
     # synchronization point across all towers.
-    grads = _average_gradients(tower_grads)
+    #grads = _average_gradients(tower_grads)
+    grads = tower_grads[0]
 
     # Add a summaries for the input processing and global_step.
     summaries.extend(input_summaries)
@@ -345,7 +343,7 @@ def xent_train(dataset):
         summary_writer.add_summary(summary_str, step)
 
       # Save the model checkpoint periodically.
-      if step % 5000 == 0 or (step + 1) == FLAGS.max_steps:
+      if step % 500 == 0 or (step + 1) == FLAGS.max_steps:
         checkpoint_path = os.path.join(FLAGS.train_dir, 'model.ckpt')
         saver.save(sess, checkpoint_path, global_step=step)
 #TODO queue batch_loader (blog)
@@ -414,7 +412,7 @@ def triplet_train(dataset):
           tf.get_variable_scope().reuse_variables()
 
           # Retain the summaries from the final tower.
-          summaries = tf.get_collection(tf.GraphKeys.SUMMARIES, scope)
+          #summaries = tf.get_collection(tf.GraphKeys.SUMMARIES, scope)
 
           # Retain the Batch Normalization updates operations only from the
           # final tower. Ideally, we should grab the updates from all towers
@@ -435,22 +433,15 @@ def triplet_train(dataset):
 #    grads = _average_gradients(tower_grads)
     grads = tower_grads[0]
 
-
-    # Add a summary to track the learning rate.
-    summaries.append(tf.scalar_summary('learning_rate', lr))
+    
+    #tf.scalar_summary('loss', loss)
+    #tf.scalar_summary('learning_rate', lr)
 
     # Add histograms for gradients.
-    for grad, var in grads:
-      if grad is not None:
-        summaries.append(
-            tf.histogram_summary(var.op.name + '/gradients', grad))
 
     # Apply the gradients to adjust the shared variables.
     apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
 
-    # Add histograms for trainable variables.
-    for var in tf.trainable_variables():
-      summaries.append(tf.histogram_summary(var.op.name, var))
 
     # Track the moving averages of all trainable variables.
     # Note that we maintain a "double-average" of the BatchNormalization
@@ -473,7 +464,7 @@ def triplet_train(dataset):
     saver = tf.train.Saver(tf.all_variables())
 
     # Build the summary operation from the last tower summaries.
-    summary_op = tf.merge_summary(summaries)
+    #summary_op = tf.merge_all_summaries()
 
     # Build an initialization operation to run below.
     init = tf.initialize_all_variables()
@@ -497,9 +488,9 @@ def triplet_train(dataset):
       print('%s: Pre-trained model restored from %s' %
             (datetime.now(), FLAGS.pretrained_model_checkpoint_path))
 
-    summary_writer = tf.train.SummaryWriter(
-        FLAGS.train_dir,
-        graph_def=sess.graph.as_graph_def(add_shapes=True))
+#    summary_writer = tf.train.SummaryWriter(
+#        FLAGS.train_dir,
+#        graph_def=sess.graph.as_graph_def(add_shapes=True))
     step = 0
     while step < FLAGS.max_steps:
       start_time = time.time()
@@ -507,14 +498,14 @@ def triplet_train(dataset):
       print('Loading traing data')
       start = time.time()
       class_per_batch = 10
-      images_per_class = 50
+      images_per_class = 300
       random_flip = False
       image_paths,num_per_class = util.sample_class(dataset,class_per_batch,images_per_class)
       image_data = util.load_data(image_paths,random_flip,)
       load_time = time.time() -start
       print('Loaded %d images in %.2f seconds' % (image_data.shape[0], load_time))
 
-      print('Selecting suitable triplets for training')
+#      print('Selecting suitable triplets for training')
       start_time = time.time()
       emb_list = []
       #Run a forward pass for the sampled images
@@ -526,7 +517,7 @@ def triplet_train(dataset):
         emb_list += sess.run([embedding], feed_dict=feed_dict)
       # Stack the embeddings to a nrof_examples_per_epoch x 128 matrix
       emb_array = np.vstack(emb_list)  
-      print('Forward %d images in %.2f seconds' % (emb_array.shape[0], time.time()-start_time))
+#      print('Forward %d images in %.2f seconds' % (emb_array.shape[0], time.time()-start_time))
 
       # Select triplets based on the embeddings
       start_time = time.time()
@@ -554,11 +545,10 @@ def triplet_train(dataset):
           print(format_str % (datetime.now(), step, loss_value,
                             examples_per_sec, duration))
 
-        print('--------------------------------------1')
         if step % 100 == 0:
-          summary_str = sess.run(summary_op)
-          summary_writer.add_summary(summary_str, step)
-        print('--------------------------------------2')
+          pass
+          #summary_str = sess.run(summary_op)
+          #summary_writer.add_summary(summary_str, step)
 
         # Save the model checkpoint periodically.
         if step % 5000 == 0 or (step + 1) == FLAGS.max_steps:

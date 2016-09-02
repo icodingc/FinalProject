@@ -1,7 +1,7 @@
 NOWDIR=`dirname "$0"`
 NOWDIR=`cd $NOWDIR; pwd`
 export CUDA_VISIBLE_DEVICES=0
-export PYTHONPATH=/home/zhangxuesen/workshops/staff/inception/
+export PYTHONPATH=/home/zhangxuesen/workshops/FinalProject2/inception/
 
 python $NOWDIR/inception/flowers_eval.py \
     --eval_dir=$NOWDIR/log_val \

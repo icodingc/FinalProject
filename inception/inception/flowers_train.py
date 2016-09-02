@@ -27,19 +27,21 @@ from inception.flowers_data import FlowersData
 from inception.util import tripletnet as util
 
 FLAGS = tf.app.flags.FLAGS
+tf.app.flags.DEFINE_string('xent', 'xent',
+                           """xent_train & triplet_train""")
 
 
 def main(_):
-  dataset = util.get_dataset('~/workshops/data/cifar10/train')
-#  dataset = FlowersData(subset=FLAGS.subset)
 #  assert dataset.data_files()
   if tf.gfile.Exists(FLAGS.train_dir):
-#    print('Dir already exits...')
-#    sys.exit()
     tf.gfile.DeleteRecursively(FLAGS.train_dir)
   tf.gfile.MakeDirs(FLAGS.train_dir)
-#  inception_train.train(dataset)
-  inception_train.triplet_train(dataset)
+  if FLAGS.xent=='xent':
+    dataset = FlowersData(subset=FLAGS.subset)
+    inception_train.xent_train(dataset)
+  else:
+    dataset = util.get_dataset('~/workshops/data/cifar10/train')
+    inception_train.triplet_train(dataset)
 
 
 if __name__ == '__main__':

@@ -412,7 +412,7 @@ def show_tfrecord():
         image = example.features.feature['encoded'].bytes_list.value
         label = example.features.feature['image/class/label'].int64_list.value[0]
         # do something
-        print image, label
+        print(image, label)
 
 def main(unused_argv):
   assert not FLAGS.train_shards % FLAGS.num_threads, (

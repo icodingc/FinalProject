@@ -41,18 +41,18 @@ tf.app.flags.DEFINE_string('checkpoint_dir', '/tmp/imagenet_train',
 # Flags governing the frequency of the eval.
 tf.app.flags.DEFINE_integer('eval_interval_secs', 60 * 5,
                             """How often to run the eval.""")
-tf.app.flags.DEFINE_boolean('run_once', False,
+tf.app.flags.DEFINE_boolean('run_once', True,
                             """Whether to run eval only once.""")
 
 # Flags governing the data used for the eval.
-tf.app.flags.DEFINE_integer('num_examples', 50000,
+tf.app.flags.DEFINE_integer('num_examples', 10000,
                             """Number of examples to run. Note that the eval """
                             """ImageNet dataset contains 50000 examples.""")
-tf.app.flags.DEFINE_string('subset', 'train',
+tf.app.flags.DEFINE_string('subset', 'validation',
                            """Either 'validation' or 'train'.""")
 
 
-def _eval_once(saver, summary_writer, feats_op, filenames_op, summary_op):
+def _eval_once(saver, summary_writer, feats_op, filenames_op, labels_op,summary_op):
   """Runs Eval once.
 
   Args:
@@ -96,13 +96,15 @@ def _eval_once(saver, summary_writer, feats_op, filenames_op, summary_op):
 
       print('%s: starting evaluation on (%s).' % (datetime.now(), FLAGS.subset))
       file_list = open('filenames.lst','w')
+      label_list = open('labels.lst','w')
       file_feats=[]
       start_time = time.time()
       while step < num_iter and not coord.should_stop():
-        [features, filenames] = sess.run([feats_op,filenames_op])
+        [features, filenames,labels] = sess.run([feats_op,filenames_op,labels_op])
         #TODO write to numpy obj
         for i,filename in enumerate(filenames):
             file_list.write(filename+'\n')
+            label_list.write(str(labels[i])+'\n')
             file_feats.append(features[i])
         step += 1
         if step % 20 == 0:
@@ -115,6 +117,7 @@ def _eval_once(saver, summary_writer, feats_op, filenames_op, summary_op):
           start_time = time.time()
       #save to disk
       file_list.close()
+      label_list.close()
       np.save('file_features',np.array(file_feats))
       print("done...")
       summary = tf.Summary()
@@ -132,7 +135,7 @@ def evaluate(dataset):
   """Evaluate model on Dataset for a number of steps."""
   with tf.Graph().as_default():
     # Get images and labels from the dataset.
-    images, labels, filenames_op = image_processing.inputs(dataset)
+    images, labels_op, filenames_op = image_processing.inputs(dataset)
 
     # Number of classes in the Dataset label set plus 1.
     # Label 0 is reserved for an (unused) background class.
@@ -140,7 +143,7 @@ def evaluate(dataset):
 
     # Build a Graph that computes the logits predictions from the
     # inference model.
-    _,_, endpoints = inception.inference(images, num_classes)
+    _ ,_, endpoints = inception.inference(images, [num_classes,128])
     #print(endpoints)
     # Calculate predictions.
 #    top_1_op = tf.nn.in_top_k(logits, labels, 1)
@@ -159,7 +162,7 @@ def evaluate(dataset):
     summary_writer = tf.train.SummaryWriter(FLAGS.eval_dir,
                                             graph_def=graph_def)
     while True:
-      _eval_once(saver, summary_writer, endpoints['mixed_8x8x2048b'], filenames_op, summary_op)
+      _eval_once(saver, summary_writer, endpoints['fc4'], filenames_op, labels_op,summary_op)
       if FLAGS.run_once:
         break
       time.sleep(FLAGS.eval_interval_secs)

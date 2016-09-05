@@ -286,6 +286,8 @@ def inception_v3(inputs,
           end_points['logits1'] = logits1
 #          end_points['predictions'] = tf.nn.softmax(logits, name='predictions')
       return logits1, logits2, end_points
+#TODO just a tiny model for test
+#using http://torch.ch/blog/2015/07/30/cifar.html
 def nin(inputs,
         output_dims,
         is_training=True,
@@ -298,22 +300,49 @@ def nin(inputs,
     with scopes.arg_scope([ops.conv2d, ops.fc, ops.batch_norm],
                           is_training=is_training):
         # conv1
-        end_points['conv1'] = ops.conv2d(inputs,64,[5,5],scope='conv1')
-        end_points['pool1'] = ops.max_pool(end_points['conv1'],[3,3],stride=2,
+        end_points['conv1_1'] = ops.conv2d(inputs,64,[3,3],scope='conv1_1')
+        net = ops.dropout(end_points['conv1_1'],0.3)
+        end_points['conv1_2'] = ops.conv2d(net,64,[3,3],scope='conv1_2')
+        end_points['pool1'] = ops.max_pool(end_points['conv1_2'],[3,3],stride=2,
                 padding='SAME',scope='pool1')
         # conv2
-        end_points['conv2'] = ops.conv2d(end_points['pool1'],64,[5,5],scope='conv2')
-        end_points['pool2'] = ops.max_pool(end_points['conv2'],[3,3],stride=2,
+        end_points['conv2_1'] = ops.conv2d(end_points['pool1'],128,[3,3],scope='conv2_1')
+        net = ops.dropout(end_points['conv2_1'],0.4)
+        end_points['conv2_2'] = ops.conv2d(net,128,[3,3],scope='conv2_2')
+        end_points['pool2'] = ops.max_pool(end_points['conv2_2'],[3,3],stride=2,
                 padding='SAME',scope='pool2')
-        # local
-        net = ops.flatten(end_points['pool2'],'flatten')
-        end_points['fc3'] = ops.fc(net,384,scope='fc3')
-        end_points['fc4'] = ops.fc(end_points['fc3'],192,scope='fc4')
+        # conv3
+        end_points['conv3_1'] = ops.conv2d(end_points['pool2'],256,[3,3],scope='conv3_1')
+        net = ops.dropout(end_points['conv3_1'],0.4)
+        end_points['conv3_2'] = ops.conv2d(net,256,[3,3],scope='conv3_2')
+        net = ops.dropout(end_points['conv3_2'],0.4)
+        end_points['conv3_3'] = ops.conv2d(net,256,[3,3],scope='conv3_3')
+        end_points['pool3'] = ops.max_pool(end_points['conv3_3'],[3,3],stride=2,
+                padding='SAME',scope='pool3')
+        # conv4
+        end_points['conv4_1'] = ops.conv2d(end_points['pool3'],512,[3,3],scope='conv4_1')
+        net = ops.dropout(end_points['conv4_1'],0.4)
+        end_points['conv4_2'] = ops.conv2d(net,512,[3,3],scope='conv4_2')
+        net = ops.dropout(end_points['conv4_2'],0.4)
+        end_points['conv4_3'] = ops.conv2d(net,512,[3,3],scope='conv4_3')
+        end_points['pool4'] = ops.max_pool(end_points['conv4_3'],[3,3],stride=2,
+                padding='SAME',scope='pool4')
+        # conv5:input 512*2*2
+        # output_dims[1]==512 embedding size
+        end_points['conv5_1'] = ops.conv2d(end_points['pool4'],512,[1,1],scope='conv5_1')
+        net = ops.dropout(end_points['conv5_1'],0.4)
+        end_points['conv5_2'] = ops.conv2d(net,512,[1,1],scope='conv5_2')
+        net = ops.dropout(end_points['conv5_2'],0.4)
+        end_points['conv5_3'] = ops.conv2d(net,512,[1,1],scope='conv5_3')
+        end_points['pool5'] = ops.avg_pool(end_points['conv5_3'],[2,2],stride=2,
+                padding='SAME',scope='pool5')
+        #local
+        net = ops.dropout(ops.flatten(end_points['pool5']),0.5)
+        net = ops.dropout(ops.fc(net,512),0.5)
 
-        logits1 = ops.fc(end_points['fc4'],output_dims[0],activation=None,scope='logits')
-        logits2 = ops.fc(end_points['fc4'], output_dims[1], activation=None, scope='logits_triplet',
-                          restore=restore_logits)
-        end_points['logits2'] = tf.nn.l2_normalize(logits2,1,1e-9,'embedding')
+        logits1 = ops.fc(net,output_dims[0],activation=None,scope='logits_xent')
+
         end_points['logits1'] = logits1
+        end_points['logits2'] = tf.nn.l2_normalize(net,1,1e-9,'logits_triplet')
 
     return end_points['logits1'],end_points['logits2'],end_points

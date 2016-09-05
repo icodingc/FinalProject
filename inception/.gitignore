@@ -1,5 +1,6 @@
 *.pyc
 log/*
 log_val/*
-log_0902/*
+log_0905/*
 features/*
+util/.ipynb_checkpoints/*

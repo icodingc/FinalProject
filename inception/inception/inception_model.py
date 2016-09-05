@@ -75,6 +75,10 @@ def xent_loss(logits, labels, batch_size=None):
                                  dense_labels,
                                  label_smoothing=0.1,
                                  weight=1.0)
+  #TODO acc
+  correct = tf.equal(tf.argmax(logits,1),tf.cast(labels,tf.int64))
+  return tf.reduce_mean(tf.cast(correct,'float'))
+
 def _activation_summary(x):
   """Helper to create summaries for activations.
 

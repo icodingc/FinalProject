@@ -6,7 +6,7 @@ from scipy.spatial import distance
 import os,sys
 from tqdm import tqdm
 
-root_dir = '../features/'
+root_dir = 'home/zhangxuesen/workshops/FinalProject2/inception/features/'
 with open(os.path.join(root_dir,'filenames.lst')) as f:
     names = f.readlines()
 names = [a.strip() for a in names]

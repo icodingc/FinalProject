@@ -34,6 +34,8 @@ tf.app.flags.DEFINE_string('xent', 'xent',
 def main(_):
 #  assert dataset.data_files()
   if tf.gfile.Exists(FLAGS.train_dir):
+    print('Already exists!')
+    sys.exit()
     tf.gfile.DeleteRecursively(FLAGS.train_dir)
   tf.gfile.MakeDirs(FLAGS.train_dir)
   if FLAGS.xent=='xent':

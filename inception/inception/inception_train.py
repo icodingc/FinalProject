@@ -108,7 +108,7 @@ def _total_loss(prefix, images, labels, output_dims, scope):
     losses = tf.get_collection('triplet_loss',scope)
     total_loss = tf.add_n(losses + regularization_losses, name='total_triplet_loss')
   else:
-    inception.xent_loss(logits1, labels, batch_size=split_batch_size)
+    acc = inception.xent_loss(logits1, labels, batch_size=split_batch_size)
     losses = tf.get_collection(slim.losses.LOSSES_COLLECTION,scope)
     total_loss = tf.add_n(losses+regularization_losses,name='total_xent_loss')
   # Compute the moving average of all individual losses and the total loss.
@@ -127,7 +127,9 @@ def _total_loss(prefix, images, labels, output_dims, scope):
     tf.scalar_summary(prefix+loss_name, loss_averages.average(l))
   with tf.control_dependencies([loss_averages_op]):
     total_loss = tf.identity(total_loss)
+  if 'triplet' not in prefix:return total_loss,endpoints['logits2'],acc
   return total_loss , endpoints['logits2']
+
 def _average_gradients(tower_grads):
   """Calculate the average gradient for each shared variable across all towers.
 
@@ -225,7 +227,7 @@ def xent_train(dataset):
             # Calculate the loss for one tower of the ImageNet model. This
             # function constructs the entire ImageNet model but shares the
             # variables across all towers.
-            loss,_ = _total_loss('xentloss',images_splits[i], labels_splits[i], [num_classes,128],
+            loss,_,acc = _total_loss('xentloss',images_splits[i], labels_splits[i], [num_classes,256],
                                scope)
 
           # Reuse variables for the next tower.
@@ -301,7 +303,7 @@ def xent_train(dataset):
     # Start running operations on the Graph. allow_soft_placement must be set to
     # True to build towers on GPU, as some of the ops do not have GPU
     # implementations.
-    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.6)
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
     sess = tf.Session(config=tf.ConfigProto(
         gpu_options = gpu_options,
         allow_soft_placement=True,
@@ -326,16 +328,16 @@ def xent_train(dataset):
 
     for step in xrange(FLAGS.max_steps):
       start_time = time.time()
-      _, loss_value = sess.run([train_op, loss])
+      _, loss_value,acu = sess.run([train_op, loss,acc])
       duration = time.time() - start_time
 
       assert not np.isnan(loss_value), 'Model diverged with loss = NaN'
 
       if step % 10 == 0:
         examples_per_sec = FLAGS.batch_size / float(duration)
-        format_str = ('%s: step %d, loss = %.2f (%.1f examples/sec; %.3f '
+        format_str = ('%s: step %d, loss = %.2f, acc = %.2f (%.1f examples/sec; %.3f '
                       'sec/batch)')
-        print(format_str % (datetime.now(), step, loss_value,
+        print(format_str % (datetime.now(), step, loss_value,acu,
                             examples_per_sec, duration))
 
       if step % 100 == 0:

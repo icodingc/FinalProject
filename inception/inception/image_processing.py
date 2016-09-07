@@ -217,7 +217,7 @@ def eval_image(image, height, width, scope=None):
   with tf.op_scope([image, height, width], scope, 'eval_image'):
     # Crop the central region of the image with an area containing 87.5% of
     # the original image.
-    image = tf.image.central_crop(image, central_fraction=0.875)
+#    image = tf.image.central_crop(image, central_fraction=0.875)
 
     # Resize the image to the original height and width.
     image = tf.expand_dims(image, 0)

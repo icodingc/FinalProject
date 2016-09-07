@@ -3,11 +3,13 @@
 *.pdf
 *.jpg
 *.pbtxt
+tmp/*
 log/*
 log_val/*
 log_0905/*
-log_0906/*
+xent_log_0907/*
 triplet_log_0906/*
+log_0906/*
 features/*
 util/.ipynb_checkpoints/*
 trained_model/*

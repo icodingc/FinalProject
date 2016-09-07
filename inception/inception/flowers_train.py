@@ -38,9 +38,12 @@ def main(_):
     sys.exit()
     tf.gfile.DeleteRecursively(FLAGS.train_dir)
   tf.gfile.MakeDirs(FLAGS.train_dir)
+#  if FLAGS.xent=='xent':
+#    dataset = FlowersData(subset=FLAGS.subset)
+#    inception_train.xent_train(dataset)
   if FLAGS.xent=='xent':
-    dataset = FlowersData(subset=FLAGS.subset)
-    inception_train.xent_train(dataset)
+    dataset = util.get_dataset('~/workshops/data/cifar10/train')
+    inception_train.xent_train2(dataset)
   else:
     dataset = util.get_dataset('~/workshops/data/cifar10/train')
     inception_train.triplet_train(dataset)

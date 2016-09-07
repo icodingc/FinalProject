@@ -11,12 +11,14 @@ import time
 
 import numpy as np
 from sklearn.utils import shuffle
+from sklearn.neighbors import KNeighborsClassifier
 import tensorflow as tf
 
 from inception import image_processing
 from inception import inception_model as inception
 from inception.slim import slim
 from inception.util import tripletnet as util
+from inception.util import helper
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -25,6 +27,8 @@ tf.app.flags.DEFINE_string('train_dir', '/tmp/imagenet_train',
                            """and checkpoint.""")
 tf.app.flags.DEFINE_integer('max_steps', 10000000,
                             """Number of batches to run.""")
+tf.app.flags.DEFINE_integer('max_epochs', 100,
+                            """Number of epochs to run.""")                            
 tf.app.flags.DEFINE_string('subset', 'train',
                            """Either 'train' or 'validation'.""")
 
@@ -129,8 +133,8 @@ def _total_loss(prefix, images, labels, output_dims, scope):
     tf.scalar_summary(prefix+loss_name, loss_averages.average(l))
   with tf.control_dependencies([loss_averages_op]):
     total_loss = tf.identity(total_loss)
-  if 'triplet' not in prefix:return total_loss,endpoints['logits2'],acc
-  return total_loss , endpoints['logits2']
+  if 'triplet' not in prefix:return total_loss,acc
+  return total_loss,endpoints['logits2']
 
 def _average_gradients(tower_grads):
   """Calculate the average gradient for each shared variable across all towers.
@@ -229,7 +233,7 @@ def xent_train(dataset):
             # Calculate the loss for one tower of the ImageNet model. This
             # function constructs the entire ImageNet model but shares the
             # variables across all towers.
-            loss,_,acc = _total_loss('xentloss',images_splits[i], labels_splits[i], [num_classes,256],
+            loss,acc = _total_loss('xentloss',images_splits[i], labels_splits[i], [num_classes,256],
                                scope)
 
           # Reuse variables for the next tower.
@@ -503,7 +507,7 @@ def triplet_train(dataset):
       start = time.time()
       class_per_batch = 10
       images_per_class = 1000
-      random_flip = False
+      random_flip = True
       image_paths,num_per_class = util.sample_class(dataset,class_per_batch,images_per_class)
       image_data = util.load_data(image_paths,random_flip,)
       load_time = time.time() -start
@@ -567,10 +571,173 @@ def triplet_train(dataset):
                       'sec/batch)')
             print(format_str % (datetime.now(), step, loss_value,
                             examples_per_sec, duration))
-
+          if step % 2000 ==0:
+            print('IR using test dataset..')
+            """
+            1. get features 
+            2. get_map
+            """
+            continue
+            current_features = None
+            print('mAP %s at step %d' % (helper.get_map(current_features),step))
           if step % 5000 == 0 or (step + 1) == FLAGS.max_steps:
             checkpoint_path = os.path.join(FLAGS.train_dir, 'model.ckpt')
             saver.save(sess, checkpoint_path, global_step=step)
           step += 1
+
+
+def xent_train2(dataset):
+  """Train on dataset for a number of steps."""
+  with tf.Graph().as_default(), tf.device('/cpu:0'):
+    # Create a variable to count the number of train() calls. This equals the
+    # number of batches processed * FLAGS.num_gpus.
+    global_step = tf.get_variable(
+        'global_step', [],
+        initializer=tf.constant_initializer(0), trainable=False)
+
+    # Calculate the learning rate schedule.
+    num_examples_per_epoch = 50000
+    num_batches_per_epoch = (num_examples_per_epoch /
+                             FLAGS.batch_size)
+    decay_steps = int(num_batches_per_epoch * FLAGS.num_epochs_per_decay)
+
+    # Decay the learning rate exponentially based on the number of steps.
+    lr = tf.train.exponential_decay(FLAGS.initial_learning_rate,
+                                    global_step,
+                                    decay_steps,
+                                    FLAGS.learning_rate_decay_factor,
+                                    staircase=True)
+
+    # Create an optimizer that performs gradient descent.
+    opt = tf.train.MomentumOptimizer(lr,0.9)
+
+    # Get images and labels for ImageNet and split the batch across GPUs.
+    assert FLAGS.batch_size % FLAGS.num_gpus == 0, (
+        'Batch size must be divisible by number of GPUs')
+    split_batch_size = int(FLAGS.batch_size / FLAGS.num_gpus)
+
+    # Override the number of preprocessing threads to account for the increased
+    # number of GPU towers.
+    num_preprocess_threads = FLAGS.num_preprocess_threads * FLAGS.num_gpus
+    
+    images = tf.placeholder(tf.float32,[None,32,32,3])
+    labels = tf.placeholder(tf.int32,[None])
+
+    num_classes = 10
+    
+     # Split the batch of images and labels for towers.
+    images_splits = tf.split(0, FLAGS.num_gpus, images)
+    labels_splits = tf.split(0, FLAGS.num_gpus, labels)
+
+    # Calculate the gradients for each model tower.
+    tower_grads = []
+    for i in xrange(FLAGS.num_gpus):
+      with tf.device('/gpu:%d' % i):
+        with tf.name_scope('%s_%d' % (inception.TOWER_NAME, i)) as scope:
+          # Force all Variables to reside on the CPU.
+          with slim.arg_scope([slim.variables.variable], device='/cpu:0'):
+            loss,acc = _total_loss('xentloss',images_splits[i], labels_splits[i], [num_classes,128],
+                               scope)
+
+          # Reuse variables for the next tower.
+          tf.get_variable_scope().reuse_variables()
+
+          batchnorm_updates = tf.get_collection(slim.ops.UPDATE_OPS_COLLECTION,
+                                                scope)
+
+          grads = opt.compute_gradients(loss)
+
+          tower_grads.append(grads)
+
+    grads = tower_grads[0]
+
+    
+    # Apply the gradients to adjust the shared variables.
+    apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
+
+
+    variable_averages = tf.train.ExponentialMovingAverage(
+        inception.MOVING_AVERAGE_DECAY, global_step)
+
+    # Another possiblility is to use tf.slim.get_variables().
+    variables_to_average = (tf.trainable_variables() +
+                            tf.moving_average_variables())
+    variables_averages_op = variable_averages.apply(variables_to_average)
+
+    # Group all updates to into a single train op.
+    batchnorm_updates_op = tf.group(*batchnorm_updates)
+    train_op = tf.group(apply_gradient_op, variables_averages_op,
+                        batchnorm_updates_op)
+
+    # Create a saver.
+    saver = tf.train.Saver(tf.all_variables())
+
+    # Build the summary operation from the last tower summaries.
+    #summary_op = tf.merge_all_summaries()
+
+    # Build an initialization operation to run below.
+    init = tf.initialize_all_variables()
+
+    # Start running operations on the Graph. allow_soft_placement must be set to
+    # True to build towers on GPU, as some of the ops do not have GPU
+    # implementations.
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.6)
+    sess = tf.Session(config=tf.ConfigProto(
+        gpu_options = gpu_options,
+        allow_soft_placement=True,
+        log_device_placement=FLAGS.log_device_placement))
+    sess.run(init)
+
+    if FLAGS.pretrained_model_checkpoint_path:
+      assert tf.gfile.Exists(FLAGS.pretrained_model_checkpoint_path)
+      variables_to_restore = tf.get_collection(
+          slim.variables.VARIABLES_TO_RESTORE)
+      restorer = tf.train.Saver(variables_to_restore)
+      restorer.restore(sess, FLAGS.pretrained_model_checkpoint_path)
+      print('%s: Pre-trained model restored from %s' %
+            (datetime.now(), FLAGS.pretrained_model_checkpoint_path))
+
+    epoch = 0
+    # load data
+    if not os.path.exists('tmp/image_data.npy'):
+      print('Loading traing data from disk')
+      start = time.time()
+      random_flip = True
+      image_paths,labels_ = util.sample_random_people(dataset)
+      image_data_ = util.load_data(image_paths,random_flip,)
+      load_time = time.time() -start
+      print('Loaded %d images in %.2f seconds' % (image_data_.shape[0], load_time))
+      #TODO save to disk
+      np.save('image_data',image_data_)
+      np.save('labels',labels_)
+    else:
+      print('Loading traing data from numpy obj')
+      image_data_ = np.load('tmp/image_data.npy')
+      labels_ = np.load('tmp/labels.npy')
+
+    while epoch < FLAGS.max_epochs:
+      # shuffle dataset
+      images_data,labels_data = shuffle(image_data_,labels_)
+      step = 0
+      for i in xrange(0,50000,FLAGS.batch_size):
+        img_batch = images_data[i:i+FLAGS.batch_size]
+        label_batch = labels_data[i:i+FLAGS.batch_size]
+
+        start_time = time.time()
+        feed_dict={images:img_batch,labels:label_batch}
+        _, loss_value,acc_value = sess.run([train_op, loss, acc],feed_dict)
+        duration = time.time() - start_time
+
+        if step % 10 == 0:
+          examples_per_sec = FLAGS.batch_size / float(duration)
+          format_str = ('%s: step %d at epoch %d , loss = %.2f, acc = %.2f (%.1f examples/sec; %.3f '
+                      'sec/batch)')
+          print(format_str % (datetime.now(), step, epoch, loss_value,acc_value,
+                            examples_per_sec, duration))
+        if epoch % 5 == 0 or (epoch + 1) == FLAGS.max_epochs:
+          checkpoint_path = os.path.join(FLAGS.train_dir, 'model.ckpt')
+          saver.save(sess, checkpoint_path, global_step=epoch)
+        step += 1
+      epoch += 1
 
 

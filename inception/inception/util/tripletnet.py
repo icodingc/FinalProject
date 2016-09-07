@@ -9,6 +9,7 @@ import os,sys
 import numpy as np
 from scipy import misc
 from tqdm import tqdm
+from sklearn.utils import shuffle
 
 class ImageClass():
     "Stores the paths to images for a given class"
@@ -38,6 +39,18 @@ def get_dataset(paths):
                 dataset.append(ImageClass(class_name, image_paths))
     return dataset
 
+def sample_random_people(dataset):
+    # Create flattened dataset with image paths and labels
+    image_paths_flat = []
+    labels_flat = []
+    for i in range(len(dataset)):
+        image_paths_flat += dataset[i].image_paths
+        labels_flat += [i] * len(dataset[i].image_paths)
+        
+    # shuffle
+    return shuffle(np.array(image_paths_flat),np.array(labels_flat))
+  
+    return image_paths, labels
 def sample_class(dataset, people_per_batch, images_per_person):
     # 10 * 5000
     nrof_images = people_per_batch * images_per_person

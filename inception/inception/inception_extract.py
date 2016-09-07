@@ -95,16 +95,17 @@ def _eval_once(saver, summary_writer, feats_op, filenames_op, labels_op,summary_
       step = 0
 
       print('%s: starting evaluation on (%s).' % (datetime.now(), FLAGS.subset))
-      file_list = open('filenames.lst','w')
-      label_list = open('labels.lst','w')
+      root_name = 'features/'
+#      file_list = open(root_name+'filenames.lst','w')
+#      label_list = open(root_name+'labels.lst','w')
       file_feats=[]
       start_time = time.time()
       while step < num_iter and not coord.should_stop():
         [features, filenames,labels] = sess.run([feats_op,filenames_op,labels_op])
         #TODO write to numpy obj
         for i,filename in enumerate(filenames):
-            file_list.write(filename+'\n')
-            label_list.write(str(labels[i])+'\n')
+#            file_list.write(filename+'\n')
+#            label_list.write(str(labels[i])+'\n')
             file_feats.append(features[i])
         step += 1
         if step % 20 == 0:
@@ -116,9 +117,9 @@ def _eval_once(saver, summary_writer, feats_op, filenames_op, labels_op,summary_
                                 examples_per_sec, sec_per_batch))
           start_time = time.time()
       #save to disk
-      file_list.close()
-      label_list.close()
-      np.save('file_features',np.array(file_feats))
+#      file_list.close()
+#      label_list.close()
+      np.save(root_name+'/triplet/file_features',np.array(file_feats))
       print("done...")
       summary = tf.Summary()
       summary.ParseFromString(sess.run(summary_op))
@@ -162,7 +163,7 @@ def evaluate(dataset):
     summary_writer = tf.train.SummaryWriter(FLAGS.eval_dir,
                                             graph_def=graph_def)
     while True:
-      _eval_once(saver, summary_writer, endpoints['fc4'], filenames_op, labels_op,summary_op)
+      _eval_once(saver, summary_writer, endpoints['pool5'], filenames_op, labels_op,summary_op)
       if FLAGS.run_once:
         break
       time.sleep(FLAGS.eval_interval_secs)

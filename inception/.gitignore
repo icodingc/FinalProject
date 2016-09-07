@@ -1,6 +1,13 @@
 *.pyc
+*.ann
+*.pdf
+*.jpg
+*.pbtxt
 log/*
 log_val/*
 log_0905/*
+log_0906/*
+triplet_log_0906/*
 features/*
 util/.ipynb_checkpoints/*
+trained_model/*

@@ -6,10 +6,12 @@ export PYTHONPATH=/home/zhangxuesen/workshops/FinalProject2/inception/
 /usr/bin/python $NOWDIR/inception/flowers_eval.py \
     --eval_dir=$NOWDIR/log_val \
     --data_dir=/home/zhangxuesen/workshops/data/tfrecord \
-    --checkpoint_dir=$NOWDIR/log_0905 \
+    --checkpoint_dir=${1} \
     --input_queue_memory_factor=1 \
     --batch_size=100 \
     --image_size=32 \
     --num_readers=1 \
     --num_preprocess_threads=4 \
 
+
+rm log_val -r

@@ -75,6 +75,8 @@ def _eval_once(saver, summary_writer, top_1_op, top_5_op, summary_op):
     else:
       print('No checkpoint file found')
       return
+#    saver.restore(sess,FLAGS.checkpoint_dir)
+#    print('succesfully loaded model from %s' % FLAGS.checkpoint_dir)
 
     # Start the queue runners.
     coord = tf.train.Coordinator()
@@ -117,7 +119,7 @@ def _eval_once(saver, summary_writer, top_1_op, top_5_op, summary_op):
       summary.ParseFromString(sess.run(summary_op))
       summary.value.add(tag='Precision @ 1', simple_value=precision_at_1)
       summary.value.add(tag='Recall @ 5', simple_value=recall_at_5)
-      summary_writer.add_summary(summary, global_step)
+#      summary_writer.add_summary(summary, global_step)
 
     except Exception as e:  # pylint: disable=broad-except
       coord.request_stop(e)

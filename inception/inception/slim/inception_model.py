@@ -334,15 +334,19 @@ def nin(inputs,
         end_points['conv5_2'] = ops.conv2d(net,512,[1,1],scope='conv5_2')
         net = ops.dropout(end_points['conv5_2'],0.4)
         end_points['conv5_3'] = ops.conv2d(net,512,[1,1],scope='conv5_3')
-        end_points['pool5'] = ops.avg_pool(end_points['conv5_3'],[2,2],stride=2,
+        end_points['pool5'] = ops.max_pool(end_points['conv5_3'],[2,2],stride=2,
                 padding='SAME',scope='pool5')
         #local
-        net = ops.dropout(ops.flatten(end_points['pool5']),0.5)
-        net = ops.dropout(ops.fc(net,512),0.5)
+        net = ops.flatten(end_points['pool5'])
+        end_points['flatten'] = net
+        net = ops.dropout(net,0.5)
+        net = ops.fc(net,512)
+        end_points['fc1'] = net
+        net = ops.dropout(net,0.5)
 
         logits1 = ops.fc(net,output_dims[0],activation=None,scope='logits_xent')
 
         end_points['logits1'] = logits1
-        end_points['logits2'] = tf.nn.l2_normalize(net,1,1e-9,'logits_triplet')
+        end_points['logits2'] = tf.nn.l2_normalize(end_points['flatten'],1,1e-9,'logits_triplet')
 
     return end_points['logits1'],end_points['logits2'],end_points
